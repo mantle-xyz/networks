@@ -1,0 +1,140 @@
+version: '3.4'
+
+x-healthcheck: &healthcheck
+  test: [ "CMD", "bash", "-c", "echo > /dev/tcp/127.0.0.1/8545" ]
+  interval: 5s
+  timeout: 5s
+  retries: 3
+  start_period: 60s
+
+services:
+  op-reth:
+    image: mantlenetworkio/mantle-op-reth:op-reth-v2.2.1-mantle-arsia.2
+    pull_policy: always
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 16000M
+        reservations:
+          cpus: '4'
+          memory: 16000M
+      restart_policy:
+        condition: on-failure
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        test -d /db/db || op-reth init --datadir /db --chain mantle-sepolia
+        exec op-reth node \
+          --chain=mantle-sepolia \
+          --datadir=/db \
+          --port=30300 \
+          --metrics=0.0.0.0:9001 \
+          --http \
+          --http.corsdomain=* \
+          --http.addr=0.0.0.0 \
+          --http.port=8545 \
+          --http.api=web3,eth,debug,txpool,net \
+          --ws \
+          --ws.addr=0.0.0.0 \
+          --ws.port=8546 \
+          --ws.origins=* \
+          --ws.api=debug,eth,txpool,net \
+          --txpool.nolocals \
+          --authrpc.addr=0.0.0.0 \
+          --authrpc.port=8551 \
+          --authrpc.jwtsecret=/secret/jwt_secret_txt \
+          --disable-discovery \
+          --rpc.max-blocks-per-filter=0 \
+          --min-suggested-priority-fee=100000 \
+          --engine.persistence-threshold=0 \
+          --engine.memory-block-buffer-target=0 \
+          --rollup.sequencer-http=https://rpc.sepolia.mantle.xyz
+    volumes:
+      - ./sepolia/secret:/secret/
+      - ./data/sepolia-reth:/db/
+    ports:
+      - ${VERIFIER_HTTP_PORT:-8545}:8545
+      - ${VERIFIER_WS_PORT:-8546}:8546
+      - ${VERIFIER_AUTH_PORT:-8551}:8551
+    healthcheck:
+      <<: *healthcheck
+  proxyd:
+    # Sits in front of op-reth. reth only has data from a fixed height onward
+    # (see op-reth's init-state/import-op step above), and some methods
+    # (eth_getProof, debug_trace*) are unreliable on reth regardless of height.
+    # Both cases get forwarded to the public RPC (rpc.sepolia.mantle.xyz)
+    # instead of erroring — see sepolia/proxyd.toml for the exact routing.
+    #
+    image: mantlenetworkio/mantle-proxyd:v1.0.2
+    pull_policy: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1000M
+        reservations:
+          cpus: '250m'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+    depends_on:
+      op-reth:
+        condition: service_healthy
+    volumes:
+      - ./sepolia/proxyd.toml:/etc/proxyd/proxyd.toml
+    ports:
+      - ${PROXYD_HTTP_PORT:-1545}:8545
+      - ${PROXYD_WS_PORT:-1546}:8546
+  op-node:
+    image: mantlenetworkio/mantle-op-node:v1.6.2
+    pull_policy: always
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8000M
+        reservations:
+          cpus: '4'
+          memory: 8000M
+      restart_policy:
+        condition: on-failure
+    depends_on:
+      op-reth:
+        condition: service_healthy
+    volumes:
+      - ./sepolia/secret:/secret
+      - ./sepolia/rollup.json:/config/rollup.json
+    environment:
+      OP_NODE_L1_ETH_RPC: $L1_RPC_SEPOLIA
+      OP_NODE_L2_ENGINE_RPC: 'http://op-reth:8551'
+      OP_NODE_L2_ENGINE_AUTH: /secret/jwt_secret_txt
+      OP_NODE_ROLLUP_CONFIG: '/config/rollup.json'
+      OP_NODE_P2P_PRIV_PATH: /secret/p2p_node_key_txt
+      OP_NODE_VERIFIER_L1_CONFS: '3'
+      OP_NODE_RPC_ADDR: '0.0.0.0'
+      OP_NODE_RPC_PORT: 8545
+      OP_NODE_P2P_LISTEN_IP: '0.0.0.0'
+      OP_NODE_P2P_LISTEN_TCP_PORT: 9003
+      OP_NODE_P2P_LISTEN_UDP_PORT: 9003
+      OP_NODE_P2P_PEER_SCORING: 'light'
+      OP_NODE_P2P_PEER_BANNING: 'true'
+      OP_NODE_METRICS_ENABLED: 'true'
+      OP_NODE_METRICS_ADDR: '0.0.0.0'
+      OP_NODE_METRICS_PORT: 7300
+      OP_NODE_PPROF_ENABLED: 'true'
+      OP_NODE_PPROF_PORT: 6060
+      OP_NODE_PPROF_ADDR: '0.0.0.0'
+      OP_NODE_P2P_DISCOVERY_PATH: '/op-node/opnode_discovery_db'
+      OP_NODE_P2P_PEERSTORE_PATH: '/op-node/opnode_peerstore_db'
+      OP_NODE_L2_BACKUP_UNSAFE_SYNC_RPC: https://rpc.sepolia.mantle.xyz
+      OP_NODE_P2P_STATIC: '/dns4/peer0.sepolia.mantle.xyz/tcp/9003/p2p/16Uiu2HAkywYkvLRUH2MXbD6tSoT3jSMAzTWTp1aDijxpXQXxG6VM'
+      OP_NODE_SEQUENCER_ENABLED: 'false'
+      OP_NODE_P2P_AGENT: 'mantle'
+      OP_NODE_P2P_SYNC_REQ_RESP: 'true'
+      OP_NODE_L1_BEACON: $L1_BEACON_SEPOLIA
+    ports:
+      - ${NODE_RPC_PORT:-9545}:8545

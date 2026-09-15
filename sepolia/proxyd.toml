@@ -1,0 +1,195 @@
+#####
+# Sits in front of a local reth node.
+#
+# reth is bootstrapped from a fixed height (see docker-compose-sepolia-reth.yml's
+# init-state/import-op step) rather than genesis, so it has no data below that
+# height. A handful of methods (eth_getProof, debug_trace*) are also heavier/less
+# reliable on reth for old data. Both cases are forwarded to the public RPC
+# (rpc.sepolia.mantle.xyz) instead of failing locally.
+#
+# Every other method op-reth exposes (web3/eth/debug/txpool/net, matching
+# --http.api on op-reth) is whitelisted below and goes straight to local reth —
+# proxyd only exists here to handle the two cases above, not to gatekeep methods.
+ws_method_whitelist = [
+  "eth_subscribe",
+  "eth_unsubscribe",
+  "web3_clientVersion",
+  "web3_sha3",
+  "net_version",
+  "net_listening",
+  "net_peerCount",
+  "eth_chainId",
+  "eth_syncing",
+  "eth_gasPrice",
+  "eth_maxPriorityFeePerGas",
+  "eth_feeHistory",
+  "eth_blockNumber",
+  "eth_getBalance",
+  "eth_getStorageAt",
+  "eth_getTransactionCount",
+  "eth_getCode",
+  "eth_getBlockByHash",
+  "eth_getBlockByNumber",
+  "eth_getHeaderByHash",
+  "eth_getHeaderByNumber",
+  "eth_getBlockRange",
+  "eth_getBlockTransactionCountByHash",
+  "eth_getBlockTransactionCountByNumber",
+  "eth_getUncleCountByBlockHash",
+  "eth_getUncleCountByBlockNumber",
+  "eth_getUncleByBlockHashAndIndex",
+  "eth_getUncleByBlockNumberAndIndex",
+  "eth_getBlockReceipts",
+  "eth_getTransactionByHash",
+  "eth_getTransactionByBlockHashAndIndex",
+  "eth_getTransactionByBlockNumberAndIndex",
+  "eth_getTransactionReceipt",
+  "eth_getRawTransactionByHash",
+  "eth_getRawTransactionByBlockHashAndIndex",
+  "eth_getRawTransactionByBlockNumberAndIndex",
+  "eth_getLogs",
+  "eth_newFilter",
+  "eth_newBlockFilter",
+  "eth_newPendingTransactionFilter",
+  "eth_getFilterChanges",
+  "eth_getFilterLogs",
+  "eth_uninstallFilter",
+  "eth_call",
+  "eth_estimateGas",
+  "eth_createAccessList",
+  "eth_sendRawTransaction",
+  "eth_sendRawTransactionWithPreconf",
+  "eth_estimateTotalFee",
+  "eth_getProof",
+  "debug_getRawBlock",
+  "debug_getRawHeader",
+  "debug_getRawReceipts",
+  "debug_getRawTransaction",
+  "debug_traceCall",
+  "debug_traceTransaction",
+  "debug_traceBlockByNumber",
+  "debug_traceBlockByHash",
+  "txpool_status",
+  "txpool_content",
+  "txpool_contentFrom",
+  "txpool_inspect",
+]
+ws_backend_group = "main"
+
+[server]
+rpc_host = "0.0.0.0"
+rpc_port = 8545
+ws_host = "0.0.0.0"
+ws_port = 8546
+max_body_size_bytes = 10485760
+max_concurrent_rpcs = 1000
+log_level = "info"
+
+[metrics]
+enabled = true
+host = "0.0.0.0"
+port = 9761
+
+[backends]
+[backends.local]
+# op-reth is the service name in docker-compose-sepolia-reth.yml
+rpc_url = "http://op-reth:8545"
+ws_url = "ws://op-reth:8546"
+max_rps = 100
+max_ws_conns = 50
+
+[backends.fallback]
+rpc_url = "https://rpc.sepolia.mantle.xyz"
+max_rps = 20
+
+[backend_groups]
+[backend_groups.main]
+backends = ["local", "fallback"]
+[backend_groups.main.height_based_routing]
+enabled = true
+# reth has no data below this height (see the init-state/import-op step) — anything
+# older is forwarded to the public RPC instead of erroring.
+cutoff_height = 36000000
+primary_backend = "local"
+fallback_backend = "fallback"
+[backend_groups.main.height_based_routing.method_config]
+eth_getBlockReceipts = 0 # first parameter is block number
+debug_traceBlockByNumber = 0
+debug_traceCall = 1
+debug_getRawBlock = 0
+debug_getRawHeader = 0
+debug_getRawReceipts = 0
+
+[backend_groups.fallback_only]
+backends = ["fallback"]
+
+# Mapping of methods to backend groups. Everything op-reth exposes (per its
+# --http.api=web3,eth,debug,txpool,net flag) is whitelisted here and defaults to
+# "main" (local reth, height-routed to fallback for pre-cutoff blocks);
+# eth_getProof/debug_trace* always go to fallback_only since reth is
+# unreliable/slow for these regardless of height. Nothing is blocked beyond that —
+# if op-reth doesn't support a method it'll error from reth itself, not proxyd.
+[rpc_method_mappings]
+eth_blockNumber = "main"
+eth_getBlockByNumber = "main"
+eth_getBlockByHash = "main"
+eth_getBlockTransactionCountByNumber = "main"
+eth_getBlockTransactionCountByHash = "main"
+eth_getUncleCountByBlockHash = "main"
+eth_getUncleCountByBlockNumber = "main"
+eth_getUncleByBlockHashAndIndex = "main"
+eth_getUncleByBlockNumberAndIndex = "main"
+eth_getBlockRange = "main"
+eth_getHeaderByNumber = "main"
+eth_getHeaderByHash = "main"
+eth_getBlockReceipts = "main"
+eth_getTransactionByBlockHashAndIndex = "main"
+eth_getTransactionByBlockNumberAndIndex = "main"
+eth_getTransactionCount = "main"
+eth_getTransactionByHash = "main"
+eth_getTransactionReceipt = "main"
+eth_getRawTransactionByHash = "main"
+eth_getRawTransactionByBlockHashAndIndex = "main"
+eth_getRawTransactionByBlockNumberAndIndex = "main"
+eth_call = "main"
+eth_createAccessList = "main"
+eth_sendRawTransaction = "main"
+eth_sendRawTransactionWithPreconf = "main"
+eth_estimateTotalFee = "main"
+eth_getBalance = "main"
+eth_getProof = "fallback_only"
+eth_getCode = "main"
+eth_getStorageAt = "main"
+eth_getLogs = "main"
+eth_newFilter = "main"
+eth_newBlockFilter = "main"
+eth_newPendingTransactionFilter = "main"
+eth_getFilterLogs = "main"
+eth_getFilterChanges = "main"
+eth_uninstallFilter = "main"
+eth_subscribe = "main"
+eth_unsubscribe = "main"
+eth_chainId = "main"
+net_listening = "main"
+net_peerCount = "main"
+eth_syncing = "main"
+net_version = "main"
+eth_estimateGas = "main"
+eth_gasPrice = "main"
+eth_maxPriorityFeePerGas = "main"
+eth_feeHistory = "main"
+web3_clientVersion = "main"
+web3_sha3 = "main"
+txpool_status = "main"
+txpool_content = "main"
+txpool_contentFrom = "main"
+txpool_inspect = "main"
+# JS tracer BigInteger.js polyfill gaps on reth — see docs/geth-fork-handling notes internally.
+debug_traceCall = "fallback_only"
+debug_traceTransaction = "fallback_only"
+debug_traceBlockByNumber = "fallback_only"
+debug_traceBlockByHash = "fallback_only"
+debug_getRawBlock = "main"
+debug_getRawHeader = "main"
+debug_getRawReceipts = "main"
+debug_getRawTransaction = "main"

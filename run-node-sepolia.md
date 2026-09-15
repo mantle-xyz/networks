@@ -109,6 +109,38 @@ export L1_BEACON_SEPOLIA='https://eth-beacon-chain-sepolia.drpc.org/rest/'  #ple
 docker-compose -f docker-compose-sepolia-upgrade-beacon.yml up -d 
 ```
 
+#### 4.3 Start a reth-based node (alternative execution client)
+
+If you'd rather run [reth](https://github.com/paradigmxyz/reth) instead of op-geth as the execution client, use `docker-compose-sepolia-reth.yml`. It uses the L1 beacon chain to pull data for the rollup node (same as 4.2), so you need `L1_RPC_SEPOLIA` and `L1_BEACON_SEPOLIA` set the same way.
+
+reth only starts from a snapshot — there's no genesis-sync path, so restore one into `./data/sepolia-reth` before the first `up -d`:
+
+```
+mkdir -p ./data/sepolia-reth
+
+# Download the latest official snapshot
+SEPOLIA_RETH_TARBALL_DATE=`curl https://s3.ap-southeast-1.amazonaws.com/snapshot.sepolia.mantle.xyz/current-reth.info`
+wget -c https://s3.ap-southeast-1.amazonaws.com/snapshot.sepolia.mantle.xyz/${SEPOLIA_RETH_TARBALL_DATE}-sepolia-reth.tar.zst
+
+# Then you can verify your download
+SEPOLIA_RETH_TARBALL_CHECKSUM=`curl https://s3.ap-southeast-1.amazonaws.com/snapshot.sepolia.mantle.xyz/${SEPOLIA_RETH_TARBALL_DATE}-sepolia-reth.tar.zst.sha256sum | awk '{print $1}'`
+echo "${SEPOLIA_RETH_TARBALL_CHECKSUM} *${SEPOLIA_RETH_TARBALL_DATE}-sepolia-reth.tar.zst" | shasum -a 256 --check
+
+# Unzip snapshot to the ledger path
+tar --use-compress-program=unzstd -xvf ${SEPOLIA_RETH_TARBALL_DATE}-sepolia-reth.tar.zst -C ./data/sepolia-reth
+```
+
+Then bring the stack up:
+
+```
+export L1_RPC_SEPOLIA='https://rpc.ankr.com/eth_sepolia'  #please replace
+export L1_BEACON_SEPOLIA='https://eth-beacon-chain-sepolia.drpc.org/rest/'  #please replace
+
+docker-compose -f docker-compose-sepolia-reth.yml up -d 
+```
+
+**Query through the `proxyd` service, not `op-reth` directly** (`${PROXYD_HTTP_PORT:-1545}` / `${PROXYD_WS_PORT:-1546}` on the host, default `http://localhost:1545`). reth only has chain data from a fixed height onward (see the `init-state`/`import-op` step in `docker-compose-sepolia-reth.yml`), and a few methods (`eth_getProof`, `debug_trace*`) are unreliable on reth regardless of height. `proxyd` forwards both cases to the public RPC (`rpc.sepolia.mantle.xyz`) instead of failing locally — see `sepolia/proxyd.toml` for the exact routing rules. Querying `op-reth`'s own port directly (`${VERIFIER_HTTP_PORT:-8545}`) skips this fallback and will error on pre-cutoff blocks or those methods.
+
 ## Check Installation Result
 
 Follow these steps to check if the installation is successful
