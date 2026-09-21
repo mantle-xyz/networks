@@ -216,12 +216,15 @@ The available services are:
 > **Note:** When upgrading, please follow the correct update order: update **mantle-op-geth** first, then update **mantle-op-node**. Reversing this order may cause unexpected issues.
 > 
 > ⚠️ **Important for v1.5.3 Upgrade:** When updating to v1.5.3 version, you must ensure that mantle-op-geth starts before mantle-op-node. Failure to follow this order may cause chain fork. If a fork occurs, please rebuild the RPC node by following the full setup instructions in this document.
+>
+> ⚠️ **Important for v1.6.3 Upgrade:** `L1_RPC_SEPOLIA` (and `L1_BEACON_SEPOLIA` if you use the beacon variant) must be `export`-ed in the **same shell session**, right before the `docker-compose ... up -d` command below. If you `down` and `up -d` in a new shell without re-exporting them, docker-compose does not error — it silently substitutes an empty string, `OP_NODE_L1_ETH_RPC` ends up blank, and op-node fails to sync from L1 with no obvious error pointing at the cause. Always re-export in the same session you run `up -d` in, even if you exported them before during a previous run.
 
 ## 1 Stop historical node
 
 ```
 docker-compose -f docker-compose-sepolia.yml down
 docker-compose -f docker-compose-sepolia-upgrade-da-indexer.yml down
+docker-compose -f docker-compose-sepolia-upgrade-beacon.yml down
 ```
 
 ## 2 Pull the latest code of this repo
@@ -260,6 +263,17 @@ export L1_RPC_SEPOLIA='https://rpc.ankr.com/eth_sepolia'  #please replace
 export L1_BEACON_SEPOLIA='https://eth-beacon-chain-sepolia.drpc.org/rest/'  #please replace
 docker-compose -f docker-compose-sepolia-upgrade-beacon.yml up -d 
 ```
+
+### 3.3 Verify the upgrade landed
+
+`docker-compose ... up -d` recreates the containers even if the image tag is unchanged in your shell's image cache, so confirm the new version is actually running rather than assuming the command succeeded:
+
+```
+docker exec <op-geth container name> geth version
+docker exec <op-node container name> op-node --version
+```
+
+Expect `v1.6.3` in both outputs. If you still see `v1.5.3`, the `pull_policy: always` on `op-geth`/`op-node` should have forced a fresh pull — re-run `docker-compose -f <your compose file> up -d` and check again before assuming something else is wrong.
 
 ## 4 Check data
 
