@@ -1,0 +1,113 @@
+version: '3.4'
+
+x-healthcheck: &healthcheck
+  test: ["CMD", "bash", "-c", "</dev/tcp/localhost/8545"]
+  interval: 5s
+  timeout: 5s
+  retries: 10
+  start_period: 120s
+
+services:
+  op-reth:
+    image: mantlenetworkio/mantle-op-reth:v1.9.3-mantle-arsia.1
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8000M
+        reservations:
+          cpus: '4'
+          memory: 8000M
+      restart_policy:
+        condition: on-failure
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: op-reth
+    command:
+      - node
+      - -vvv
+      - --chain=/genesis.json
+      - --datadir=/db
+      - --port=9003
+      - --metrics=0.0.0.0:6060
+      - --http
+      - --http.corsdomain="*"
+      - --http.addr=0.0.0.0
+      - --http.port=8545
+      - --http.api=web3,debug,eth,txpool,net,admin
+      - --ws
+      - --ws.addr=0.0.0.0
+      - --ws.port=8546
+      - --ws.origins="*"
+      - --ws.api=debug,eth,txpool,net
+      - --txpool.nolocals
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.jwtsecret=/secret/jwt_secret_txt
+      - --rollup.sequencer-http=https://rpc.hoodi.mantle.xyz
+      - --disable-discovery
+      - --rpc.max-response-size=1024
+      - --rpc.max-blocks-per-filter=10000
+      - --rpc.eth-proof-window=100000
+      - --min-suggested-priority-fee=100000
+      - --engine.persistence-threshold=0
+      - --engine.memory-block-buffer-target=0
+    volumes:
+      - ./hoodi/secret:/secret/
+      - ./data/hoodi-reth:/db/
+      - ./hoodi/genesis.json:/genesis.json
+    ports:
+      - ${VERIFIER_HTTP_PORT:-8545}:8545
+      - ${VERIFIER_WS_PORT:-8546}:8546
+      - ${VERIFIER_AUTH_PORT:-8551}:8551
+      - ${VERIFIER_METRICS_PORT:-6060}:6060
+    healthcheck:
+      <<: *healthcheck
+  op-node:
+    image: mantlenetworkio/mantle-op-node:v1.5.4
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8000M
+        reservations:
+          cpus: '2'
+          memory: 2000M
+      restart_policy:
+        condition: on-failure
+    depends_on:
+      op-reth:
+        condition: service_healthy
+    volumes:
+      - ./hoodi/secret:/secret
+      - ./hoodi/rollup.json:/config/rollup.json
+    environment:
+      OP_NODE_L1_ETH_RPC: $L1_RPC_HOODI
+      OP_NODE_L2_ENGINE_RPC: 'http://op-reth:8551'
+      OP_NODE_L2_ENGINE_AUTH: /secret/jwt_secret_txt
+      OP_NODE_ROLLUP_CONFIG: '/config/rollup.json'
+      OP_NODE_P2P_PRIV_PATH: /secret/p2p_node_key_txt
+      OP_NODE_VERIFIER_L1_CONFS: '3'
+      OP_NODE_RPC_ADDR: '0.0.0.0'
+      OP_NODE_RPC_PORT: 8545
+      OP_NODE_P2P_LISTEN_IP: '0.0.0.0'
+      OP_NODE_P2P_LISTEN_TCP_PORT: 9003
+      OP_NODE_P2P_LISTEN_UDP_PORT: 9003
+      OP_NODE_P2P_PEER_SCORING: 'light'
+      OP_NODE_P2P_PEER_BANNING: 'true'
+      OP_NODE_METRICS_ENABLED: 'true'
+      OP_NODE_METRICS_ADDR: '0.0.0.0'
+      OP_NODE_METRICS_PORT: 7300
+      OP_NODE_PPROF_ENABLED: 'true'
+      OP_NODE_PPROF_PORT: 6060
+      OP_NODE_PPROF_ADDR: '0.0.0.0'
+      OP_NODE_P2P_DISCOVERY_PATH: '/op-node/opnode_discovery_db'
+      OP_NODE_P2P_PEERSTORE_PATH: '/op-node/opnode_peerstore_db'
+      OP_NODE_L2_BACKUP_UNSAFE_SYNC_RPC: https://rpc.hoodi.mantle.xyz
+      OP_NODE_P2P_STATIC: '/dns4/peer0.hoodi.mantle.xyz/tcp/9003/p2p/16Uiu2HAm3n6Jq9rM1cTTCbV6Cq8AM7ZPWB3HXZwU5Uj1YvTctn7M,/dns4/peer1.hoodi.mantle.xyz/tcp/9003/p2p/16Uiu2HAmNU5hFapeWXmJc1gUchyWhrCoji4XJ3dGmyzAKqC1fgDi'
+      OP_NODE_SEQUENCER_ENABLED: 'false'
+      OP_NODE_P2P_AGENT: 'mantle'
+      OP_NODE_P2P_SYNC_REQ_RESP: 'true'
+      OP_NODE_L1_BEACON: $L1_BEACON_HOODI
+    ports:
+      - ${NODE_RPC_PORT:-9545}:8545
