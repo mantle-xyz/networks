@@ -9,7 +9,7 @@ x-healthcheck: &healthcheck
 
 services:
   op-reth:
-    image: mantlenetworkio/mantle-op-reth:v1.9.3-mantle-arsia.1
+    image: mantlenetworkio/mantle-op-reth:mantle-v1.6.2
     deploy:
       resources:
         limits:
@@ -64,7 +64,7 @@ services:
     healthcheck:
       <<: *healthcheck
   op-node:
-    image: mantlenetworkio/mantle-op-node:v1.5.4
+    image: mantlenetworkio/mantle-op-node:v1.6.3
     deploy:
       resources:
         limits:
