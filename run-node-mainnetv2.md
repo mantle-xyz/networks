@@ -87,7 +87,7 @@ export L1_RPC_MAINNET='https://rpc.ankr.com/eth'  #please replace
 docker-compose -f docker-compose-mainnetv2-upgrade-da-indexer.yml up -d
 ```
 
-Will start the node in a detatched shell (`-d`), meaning the node will continue to run in the background.
+Will start the node in a detached shell (`-d`), meaning the node will continue to run in the background.
 You will need to run this again if you ever turn your machine off.
 
 The first time you start the node it synchronizes from regenesis (December 1th, 2022) to the present.
