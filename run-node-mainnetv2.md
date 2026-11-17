@@ -120,6 +120,69 @@ export L1_BEACON_MAINNET='https://eth-beacon-chain.drpc.org/rest/'  #please repl
 docker-compose -f docker-compose-mainnetv2-upgrade-beacon.yml up -d 
 ```
 
+#### Start a reth-based node (alternative execution client)
+
+If you'd rather run [reth](https://github.com/paradigmxyz/reth) instead of op-geth as the execution client, use `docker-compose-mainnet-reth.yml`. It uses the L1 beacon chain to pull data for the rollup node (same as above), so you need `L1_RPC_MAINNET` and `L1_BEACON_MAINNET` set the same way.
+
+Recommended hardware for the reth node: 16GB+ RAM, 8C+ CPU, 500GB+ SSD. The compressed snapshot is ~55GB.
+
+reth only starts from the official reth snapshot (published weekly) — there's no genesis-sync path, and the reth service refuses to start if `./data/mainnet-reth` is empty. Restore the snapshot before the first `up -d`:
+
+```sh
+mkdir -p ./data/mainnet-reth
+
+# Download the latest official reth snapshot
+MAINNET_RETH_TARBALL_DATE=`curl https://s3.ap-southeast-1.amazonaws.com/snapshot.mantle.xyz/current-reth.info`
+wget -c https://s3.ap-southeast-1.amazonaws.com/snapshot.mantle.xyz/${MAINNET_RETH_TARBALL_DATE}-mainnet-reth.tar.zst
+# or, faster: aria2c -x 16 -s 16 -k 100M https://s3.ap-southeast-1.amazonaws.com/snapshot.mantle.xyz/${MAINNET_RETH_TARBALL_DATE}-mainnet-reth.tar.zst
+
+# Then you can verify your download
+MAINNET_RETH_TARBALL_CHECKSUM=`curl https://s3.ap-southeast-1.amazonaws.com/snapshot.mantle.xyz/${MAINNET_RETH_TARBALL_DATE}-mainnet-reth.tar.zst.sha256sum | awk '{print $1}'`
+echo "${MAINNET_RETH_TARBALL_CHECKSUM} *${MAINNET_RETH_TARBALL_DATE}-mainnet-reth.tar.zst" | shasum -a 256 --check
+
+# You should get the following output:
+# ${MAINNET_RETH_TARBALL_DATE}-mainnet-reth.tar.zst: OK
+
+# Unzip snapshot to the ledger path
+tar --use-compress-program=unzstd -xvf ${MAINNET_RETH_TARBALL_DATE}-mainnet-reth.tar.zst -C ./data/mainnet-reth
+```
+
+Check the data was unarchived successfully:
+
+```sh
+$ ls ./data/mainnet-reth
+db  ...
+```
+
+Then bring the stack up:
+
+```sh
+export L1_RPC_MAINNET='https://rpc.ankr.com/eth'  #please replace
+export L1_BEACON_MAINNET='https://eth-beacon-chain.drpc.org/rest/'  #please replace
+
+docker-compose -f docker-compose-mainnet-reth.yml up -d
+```
+
+`L1_RPC_MAINNET` / `L1_BEACON_MAINNET` must be `export`-ed in the **same shell session** right before `up -d`: if they're missing, docker-compose silently substitutes an empty string and op-node can't sync from L1.
+
+**Query through the `proxyd` service, not `op-reth` directly** (`${PROXYD_HTTP_PORT:-1545}` / `${PROXYD_WS_PORT:-1546}` on the host, default `http://localhost:1545`). reth only has chain data from block `87370342` onward (where the official reth snapshot starts), and a few methods (`eth_getProof`, `debug_trace*`) are unreliable on reth regardless of height. `proxyd` forwards both cases to the public RPC (`rpc.mantle.xyz`) instead of failing locally — see `mainnet/proxyd.toml` for the exact routing rules. Querying `op-reth`'s own port directly (`${VERIFIER_HTTP_PORT:-8545}`) skips this fallback and will error on pre-cutoff blocks or those methods.
+
+Check that it's syncing:
+
+```sh
+# local height (through proxyd) vs. the public RPC
+cast bn --rpc-url http://localhost:1545
+cast bn --rpc-url https://rpc.mantle.xyz
+
+# rollup node sync status; safe_l2 / finalized_l2 may take ~30 minutes to start moving
+cast rpc optimism_syncStatus --rpc-url localhost:9545 | jq .safe_l2.number
+
+# confirm the running image tags (op-reth mantle-v1.6.3, op-node v1.6.2)
+docker-compose -f docker-compose-mainnet-reth.yml images
+```
+
+To stop / restart / view logs, use the same commands as below with `-f docker-compose-mainnet-reth.yml`; the services are `op-reth`, `proxyd` and `op-node`. To restore from a newer snapshot, `down`, `rm -rf ./data/mainnet-reth`, and repeat the download / unzip steps above.
+
 #### Stop
 
 ```sh
