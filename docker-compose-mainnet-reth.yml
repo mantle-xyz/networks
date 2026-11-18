@@ -67,8 +67,8 @@ services:
       <<: *healthcheck
   proxyd:
     # Sits in front of op-reth. reth only has data from block 87370342 onward
-    # (where the official reth snapshot starts), and some methods
-    # (eth_getProof, debug_trace*) are unreliable on reth regardless of height.
+    # (where the official reth snapshot starts), and eth_getProof
+    # is heavier on reth regardless of height.
     # Both cases get forwarded to the public RPC (rpc.mantle.xyz)
     # instead of erroring — see mainnet/proxyd.toml for the exact routing.
     #

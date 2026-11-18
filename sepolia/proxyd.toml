@@ -3,9 +3,12 @@
 #
 # reth is bootstrapped from a fixed height (see docker-compose-sepolia-reth.yml's
 # init-state/import-op step) rather than genesis, so it has no data below that
-# height. A handful of methods (eth_getProof, debug_trace*) are also heavier/less
-# reliable on reth for old data. Both cases are forwarded to the public RPC
-# (rpc.sepolia.mantle.xyz) instead of failing locally.
+# height. Pre-cutoff requests, and eth_getProof (heavier on reth), are forwarded to
+# the public RPC (rpc.sepolia.mantle.xyz) instead of failing locally.
+#
+# debug_trace* is served by local reth (native tracers and simple JS tracers work).
+# The public RPC does not expose the debug namespace, so tracing blocks below the
+# cutoff is not available.
 #
 # Every other method op-reth exposes (web3/eth/debug/txpool/net, matching
 # --http.api on op-reth) is whitelisted below and goes straight to local reth —
@@ -126,8 +129,9 @@ backends = ["fallback"]
 # Mapping of methods to backend groups. Everything op-reth exposes (per its
 # --http.api=web3,eth,debug,txpool,net flag) is whitelisted here and defaults to
 # "main" (local reth, height-routed to fallback for pre-cutoff blocks);
-# eth_getProof/debug_trace* always go to fallback_only since reth is
-# unreliable/slow for these regardless of height. Nothing is blocked beyond that —
+# eth_getProof always goes to fallback_only (heavier on reth). debug_trace* stays on
+# "main": the public RPC rejects debug_* ("rpc method is not whitelisted"), so
+# routing it there would only return "no backends available". Nothing is blocked beyond that —
 # if op-reth doesn't support a method it'll error from reth itself, not proxyd.
 [rpc_method_mappings]
 eth_blockNumber = "main"
@@ -184,11 +188,12 @@ txpool_status = "main"
 txpool_content = "main"
 txpool_contentFrom = "main"
 txpool_inspect = "main"
-# JS tracer BigInteger.js polyfill gaps on reth — see docs/geth-fork-handling notes internally.
-debug_traceCall = "fallback_only"
-debug_traceTransaction = "fallback_only"
-debug_traceBlockByNumber = "fallback_only"
-debug_traceBlockByHash = "fallback_only"
+# Served by local reth. The public RPC does not expose debug_*, so pre-cutoff tracing
+# (height-routed to the fallback) fails with "no backends available".
+debug_traceCall = "main"
+debug_traceTransaction = "main"
+debug_traceBlockByNumber = "main"
+debug_traceBlockByHash = "main"
 debug_getRawBlock = "main"
 debug_getRawHeader = "main"
 debug_getRawReceipts = "main"

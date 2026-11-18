@@ -39,7 +39,8 @@ mkdir sepolia/secret
 
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" > sepolia/secret/jwt_secret_txt
 
-cast w n |grep -i "Private Key" |awk -F ": " '{print $2}' |sed 's/0x//' > sepolia/secret/p2p_node_key_txt
+# any random 32-byte hex works as the op-node p2p key
+openssl rand -hex 32 > sepolia/secret/p2p_node_key_txt
 ```
 
 ### 3 Download the latest snapshot from mantle
@@ -139,7 +140,9 @@ export L1_BEACON_SEPOLIA='https://eth-beacon-chain-sepolia.drpc.org/rest/'  #ple
 docker-compose -f docker-compose-sepolia-reth.yml up -d 
 ```
 
-**Query through the `proxyd` service, not `op-reth` directly** (`${PROXYD_HTTP_PORT:-1545}` / `${PROXYD_WS_PORT:-1546}` on the host, default `http://localhost:1545`). reth only has chain data from a fixed height onward (see the `init-state`/`import-op` step in `docker-compose-sepolia-reth.yml`), and a few methods (`eth_getProof`, `debug_trace*`) are unreliable on reth regardless of height. `proxyd` forwards both cases to the public RPC (`rpc.sepolia.mantle.xyz`) instead of failing locally — see `sepolia/proxyd.toml` for the exact routing rules. Querying `op-reth`'s own port directly (`${VERIFIER_HTTP_PORT:-8545}`) skips this fallback and will error on pre-cutoff blocks or those methods.
+**Query through the `proxyd` service, not `op-reth` directly** (`${PROXYD_HTTP_PORT:-1545}` / `${PROXYD_WS_PORT:-1546}` on the host, default `http://localhost:1545`). reth only has chain data from a fixed height onward (see the `init-state`/`import-op` step in `docker-compose-sepolia-reth.yml`), and `eth_getProof` is heavier on reth. `proxyd` forwards both to the public RPC (`rpc.sepolia.mantle.xyz`) instead of failing locally — see `sepolia/proxyd.toml` for the exact routing rules. Querying `op-reth`'s own port directly (`${VERIFIER_HTTP_PORT:-8545}`) skips this fallback: pre-cutoff blocks come back as `null` / empty.
+
+`debug_trace*` is served by your local reth. The public RPC does not expose the `debug_*` namespace, so tracing blocks below the cutoff is not available.
 
 ## Check Installation Result
 

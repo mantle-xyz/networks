@@ -26,7 +26,8 @@ mkdir -p mainnet/secret
 
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" > mainnet/secret/jwt_secret_txt
 
-cast w n |grep -i "Private Key" |awk -F ": " '{print $2}' |sed 's/0x//' > mainnet/secret/p2p_node_key_txt
+# any random 32-byte hex works as the op-node p2p key
+openssl rand -hex 32 > mainnet/secret/p2p_node_key_txt
 ```
 
 ### Operating the Node
@@ -154,6 +155,8 @@ $ ls ./data/mainnet-reth
 db  ...
 ```
 
+The snapshot unpacks to ~110GB; once `shasum --check` reports `OK` and the unzip has finished, you can delete the `.tar.zst` file to free ~55GB.
+
 Then bring the stack up:
 
 ```sh
@@ -165,7 +168,11 @@ docker-compose -f docker-compose-mainnet-reth.yml up -d
 
 `L1_RPC_MAINNET` / `L1_BEACON_MAINNET` must be `export`-ed in the **same shell session** right before `up -d`: if they're missing, docker-compose silently substitutes an empty string and op-node can't sync from L1.
 
-**Query through the `proxyd` service, not `op-reth` directly** (`${PROXYD_HTTP_PORT:-1545}` / `${PROXYD_WS_PORT:-1546}` on the host, default `http://localhost:1545`). reth only has chain data from block `87370342` onward (where the official reth snapshot starts), and a few methods (`eth_getProof`, `debug_trace*`) are unreliable on reth regardless of height. `proxyd` forwards both cases to the public RPC (`rpc.mantle.xyz`) instead of failing locally — see `mainnet/proxyd.toml` for the exact routing rules. Querying `op-reth`'s own port directly (`${VERIFIER_HTTP_PORT:-8545}`) skips this fallback and will error on pre-cutoff blocks or those methods.
+The snapshot is taken weekly (Sunday), so a fresh node starts up to a week behind and catches up at roughly 10-15 blocks/s (about 2.5 hours for 3 days of blocks on an 8-core / SSD machine). Until it has caught up, recent blocks return `null` locally.
+
+**Query through the `proxyd` service, not `op-reth` directly** (`${PROXYD_HTTP_PORT:-1545}` / `${PROXYD_WS_PORT:-1546}` on the host, default `http://localhost:1545`). reth only has chain data from block `87370342` onward (where the official reth snapshot starts), and `eth_getProof` is heavier on reth. `proxyd` forwards both to the public RPC (`rpc.mantle.xyz`) instead of failing locally — see `mainnet/proxyd.toml` for the exact routing rules. Querying `op-reth`'s own port directly (`${VERIFIER_HTTP_PORT:-8545}`) skips this fallback: pre-cutoff blocks come back as `null` / empty.
+
+`debug_trace*` is served by your local reth (native tracers such as `callTracer` / `prestateTracer`, and simple JS tracers). The public RPC does not expose the `debug_*` namespace, so tracing blocks below `87370342` is not available.
 
 Check that it's syncing:
 
